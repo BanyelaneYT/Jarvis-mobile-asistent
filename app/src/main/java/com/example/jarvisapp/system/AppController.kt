@@ -25,7 +25,7 @@ class AppController(
                 if (launch != null) {
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(launch)
-                    speak("Abriendo ${pm.getApplicationLabel(app)}, Señor.")
+                    speak("Abriendo ${pm.getApplicationLabel(app)}.")
                     return
                 }
             }
@@ -34,15 +34,13 @@ class AppController(
     }
 
     /**
-     * Versión avanzada de WhatsApp
-     * Ejemplo de uso: sendWhatsApp("mamá", "ya voy para allá")
+     * Función avanzada para WhatsApp
      */
     fun sendWhatsApp(contactName: String?, message: String?) {
         val cleanMessage = message?.trim() ?: ""
         val cleanContact = contactName?.trim()?.lowercase()
 
-        if (cleanMessage.isEmpty()) {
-            // Solo abrir WhatsApp
+        if (cleanMessage.isEmpty() && cleanContact.isNullOrEmpty()) {
             openWhatsApp()
             return
         }
@@ -56,12 +54,12 @@ class AppController(
             val intent = Intent(Intent.ACTION_VIEW)
 
             if (phoneNumber != null) {
-                // Abrir chat específico + mensaje ya escrito
+                // Abre el chat del contacto + mensaje ya escrito
                 val url = "https://api.whatsapp.com/send?phone=$phoneNumber&text=${Uri.encode(cleanMessage)}"
                 intent.data = Uri.parse(url)
                 speak("Preparando mensaje para $cleanContact.")
             } else {
-                // No encontramos el contacto → abrimos con el mensaje listo
+                // No encontró el contacto → abre con el mensaje listo
                 val url = "https://api.whatsapp.com/send?text=${Uri.encode(cleanMessage)}"
                 intent.data = Uri.parse(url)
                 speak("Mensaje listo. Selecciona el contacto.")
@@ -72,7 +70,6 @@ class AppController(
             context.startActivity(intent)
 
         } catch (e: Exception) {
-            // Fallback si no tiene WhatsApp
             speak("No pude abrir WhatsApp.")
             openWhatsApp(cleanMessage)
         }
@@ -96,17 +93,15 @@ class AppController(
     }
 
     /**
-     * Busca el número de teléfono de un contacto por nombre
+     * Busca el número de un contacto por nombre
      */
     private fun findPhoneNumber(name: String): String? {
-        // Verificar permiso
         if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.READ_CONTACTS)
             != PackageManager.PERMISSION_GRANTED) {
             return null
         }
 
-        val contentResolver = context.contentResolver
-        val cursor: Cursor? = contentResolver.query(
+        val cursor: Cursor? = context.contentResolver.query(
             ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
             arrayOf(
                 ContactsContract.CommonDataKinds.Phone.NUMBER,
@@ -120,7 +115,6 @@ class AppController(
         cursor?.use {
             if (it.moveToFirst()) {
                 var number = it.getString(0)
-                // Limpiar el número (quitar espacios, guiones, etc.)
                 number = number.replace(Regex("[^0-9+]"), "")
                 return number
             }
