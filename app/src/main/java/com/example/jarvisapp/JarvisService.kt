@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
@@ -21,13 +20,13 @@ import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.core.app.NotificationCompat
 import com.example.jarvisapp.ai.ModelRouter
 import com.example.jarvisapp.system.AppController
 import com.example.jarvisapp.system.BatteryMonitor
 import com.example.jarvisapp.system.SearchHelper
+import com.example.jarvisapp.ui.ArcReactorView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,17 +41,17 @@ class JarvisService : Service() {
     private val scope = CoroutineScope(Dispatchers.Main)
 
     private lateinit var windowManager: WindowManager
-    private lateinit var floatingView: View
+    private lateinit var arcReactor: ArcReactorView
     private var tts: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var speechIntent: Intent
 
-    // Variables para el long-press
-    private var initialX: Int = 0
-    private var initialY: Int = 0
-    private var initialTouchX: Float = 0f
-    private var initialTouchY: Float = 0f
-    private var pressStartTime: Long = 0
+    // Touch
+    private var initialX = 0
+    private var initialY = 0
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
+    private var pressStartTime = 0L
     private var inputOverlay: View? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -62,12 +61,10 @@ class JarvisService : Service() {
 
         crearNotificacion()
         configurarEscucha()
-        mostrarEsferaInteractiva()
+        mostrarArcReactor()
 
-        // Router de IA
         modelRouter = ModelRouter()
 
-        // TTS + helpers
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("es", "MX")
@@ -80,7 +77,7 @@ class JarvisService : Service() {
                 batteryMonitor.start()
 
                 tts?.speak(
-                    "Sistemas listos, Señor. Reactor Arc iniciado.",
+                    "Sistemas listos, Reactor Arc iniciado.",
                     TextToSpeech.QUEUE_FLUSH,
                     null,
                     null
@@ -89,29 +86,23 @@ class JarvisService : Service() {
         }
     }
 
-    private fun mostrarEsferaInteractiva() {
+    private fun mostrarArcReactor() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        floatingView = FrameLayout(this).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(0xFF00D4FF.toInt())
-                setStroke(4, 0xFFFFFFFF.toInt())
-            }
-        }
+        arcReactor = ArcReactorView(this)
 
         val params = WindowManager.LayoutParams(
-            120, 120,
+            160, 160,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 100
+            x = 80
+            y = 180
         }
 
-        floatingView.setOnTouchListener { _, event ->
+        arcReactor.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
@@ -126,11 +117,10 @@ class JarvisService : Service() {
                     val diffX = Math.abs(event.rawX - initialTouchX)
                     val diffY = Math.abs(event.rawY - initialTouchY)
 
-                    // Solo mover si se arrastra más de 15 píxeles
-                    if (diffX > 15 || diffY > 15) {
+                    if (diffX > 18 || diffY > 18) {
                         params.x = initialX + (event.rawX - initialTouchX).toInt()
                         params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        windowManager.updateViewLayout(floatingView, params)
+                        windowManager.updateViewLayout(arcReactor, params)
                     }
                     true
                 }
@@ -140,13 +130,10 @@ class JarvisService : Service() {
                     val diffX = Math.abs(event.rawX - initialTouchX)
                     val diffY = Math.abs(event.rawY - initialTouchY)
 
-                    // Si no se movió
-                    if (diffX < 15 && diffY < 15) {
+                    if (diffX < 18 && diffY < 18) {
                         if (pressDuration >= 2000) {
-                            // Long press → pantalla de texto
                             mostrarPantallaDeTexto()
                         } else {
-                            // Toque corto → micrófono
                             activarMicrofono()
                         }
                     }
@@ -157,24 +144,24 @@ class JarvisService : Service() {
             }
         }
 
-        windowManager.addView(floatingView, params)
+        windowManager.addView(arcReactor, params)
     }
 
     private fun mostrarPantallaDeTexto() {
         if (inputOverlay != null) return
 
         val editText = EditText(this).apply {
-            hint = "Escribe tu solicitud..."
-            setTextColor(0xFFFFFFFF.toInt())
-            setHintTextColor(0xFFAAAAAA.toInt())
-            setBackgroundColor(0xFF1A1A2E.toInt())
-            setPadding(40, 30, 40, 30)
+            hint = "Escriba su solicitud..."
+            setTextColor(0xFFE0F7FA.toInt())
+            setHintTextColor(0xFF80DEEA.toInt())
+            setBackgroundColor(0xCC0A192F.toInt())
+            setPadding(48, 36, 48, 36)
             textSize = 16f
-            minWidth = 650
+            minWidth = 680
         }
 
         val btnEnviar = Button(this).apply {
-            text = "Enviar"
+            text = "ENVIAR"
             setBackgroundColor(0xFF00D4FF.toInt())
             setTextColor(0xFF000000.toInt())
             setOnClickListener {
@@ -188,21 +175,23 @@ class JarvisService : Service() {
 
         val btnCerrar = Button(this).apply {
             text = "✕"
-            setBackgroundColor(0xFFFF4444.toInt())
+            setBackgroundColor(0xFFFF1744.toInt())
             setTextColor(0xFFFFFFFF.toInt())
             setOnClickListener { ocultarPantallaDeTexto() }
         }
 
         val botones = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 24, 0, 0)
             addView(btnEnviar)
             addView(btnCerrar)
         }
 
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xEE0F0F1A.toInt())
+            setBackgroundColor(0xEE020617.toInt())
             setPadding(40, 40, 40, 40)
+            elevation = 24f
             addView(editText)
             addView(botones)
         }
@@ -220,7 +209,6 @@ class JarvisService : Service() {
         inputOverlay = layout
         windowManager.addView(layout, params)
 
-        // Mostrar teclado
         editText.requestFocus()
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
@@ -248,15 +236,15 @@ class JarvisService : Service() {
                 if (!matches.isNullOrEmpty()) {
                     procesarComando(matches[0])
                 }
-                cambiarColorEsfera(0xFF00D4FF.toInt())
+                arcReactor.setState(ArcReactorView.State.IDLE)
             }
 
             override fun onError(error: Int) {
-                cambiarColorEsfera(0xFF00D4FF.toInt())
+                arcReactor.setState(ArcReactorView.State.IDLE)
             }
 
             override fun onReadyForSpeech(params: Bundle?) {
-                cambiarColorEsfera(0xFFFF0000.toInt())
+                arcReactor.setState(ArcReactorView.State.LISTENING)
             }
 
             override fun onBeginningOfSpeech() {}
@@ -271,65 +259,57 @@ class JarvisService : Service() {
     private fun activarMicrofono() {
         try {
             speechRecognizer?.startListening(speechIntent)
-        } catch (e: Exception) {
-            // Silenciar errores
-        }
-    }
-
-    private fun cambiarColorEsfera(color: Int) {
-        val drawable = floatingView.background as GradientDrawable
-        drawable.setColor(color)
+        } catch (_: Exception) {}
     }
 
     private fun procesarComando(command: String) {
         val input = command.lowercase()
-
         if (!input.contains("jarvis")) return
 
         val clean = input.replace("jarvis", "").trim()
 
         when {
-            clean.contains("nos vemos") ||
-                    clean.contains("apágate") ||
-                    clean.contains("apagate") -> {
+            clean.contains("nos vemos") || clean.contains("apágate") || clean.contains("apagate") -> {
                 apagarSistemas()
             }
 
-            clean.contains("estado") ||
-                    clean.contains("batería") ||
-                    clean.contains("bateria") -> {
+            clean.contains("estado") || clean.contains("batería") || clean.contains("bateria") -> {
                 reportarEstadoBateria()
             }
 
             clean.startsWith("abre ") -> {
                 val app = clean.removePrefix("abre ").trim()
-                if (::appController.isInitialized) {
-                    appController.openApp(app)
-                }
+                if (::appController.isInitialized) appController.openApp(app)
             }
 
             clean.startsWith("busca ") || clean.startsWith("buscar ") -> {
-                val query = clean
-                    .substringAfter("busca")
-                    .substringAfter("buscar")
-                    .trim()
-                if (::searchHelper.isInitialized) {
-                    searchHelper.search(query)
-                }
+                val query = clean.substringAfter("busca").substringAfter("buscar").trim()
+                if (::searchHelper.isInitialized) searchHelper.search(query)
             }
 
             clean.contains("whatsapp") -> {
-                if (::appController.isInitialized) {
-                    appController.openWhatsApp()
-                }
+                if (::appController.isInitialized) appController.openWhatsApp()
             }
 
             else -> {
                 if (::modelRouter.isInitialized) {
+                    arcReactor.setState(ArcReactorView.State.THINKING)
                     scope.launch {
                         val taskType = modelRouter.detectTaskType(clean)
                         val respuesta = modelRouter.chat(clean, taskType)
+                        arcReactor.setState(ArcReactorView.State.SPEAKING)
                         tts?.speak(respuesta, TextToSpeech.QUEUE_FLUSH, null, null)
+
+                        // Volver a IDLE después de hablar (aproximado)
+                        tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                            override fun onStart(utteranceId: String?) {}
+                            override fun onDone(utteranceId: String?) {
+                                arcReactor.post { arcReactor.setState(ArcReactorView.State.IDLE) }
+                            }
+                            override fun onError(utteranceId: String?) {
+                                arcReactor.post { arcReactor.setState(ArcReactorView.State.IDLE) }
+                            }
+                        })
                     }
                 }
             }
@@ -338,10 +318,10 @@ class JarvisService : Service() {
 
     private fun apagarSistemas() {
         tts?.speak("Desconectando sistemas.", TextToSpeech.QUEUE_FLUSH, null, null)
-        floatingView.postDelayed({
+        arcReactor.postDelayed({
             stopForeground(true)
             stopSelf()
-        }, 2500)
+        }, 2200)
     }
 
     private fun reportarEstadoBateria() {
@@ -362,13 +342,8 @@ class JarvisService : Service() {
     private fun crearNotificacion() {
         val channelId = "jarvis_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Jarvis",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            val channel = NotificationChannel(channelId, "Jarvis", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
         val notification = NotificationCompat.Builder(this, channelId)
@@ -382,14 +357,9 @@ class JarvisService : Service() {
 
     override fun onDestroy() {
         ocultarPantallaDeTexto()
-
-        if (::batteryMonitor.isInitialized) {
-            batteryMonitor.stop()
-        }
-        if (::floatingView.isInitialized) {
-            try {
-                windowManager.removeView(floatingView)
-            } catch (_: Exception) {}
+        if (::batteryMonitor.isInitialized) batteryMonitor.stop()
+        if (::arcReactor.isInitialized) {
+            try { windowManager.removeView(arcReactor) } catch (_: Exception) {}
         }
         speechRecognizer?.destroy()
         tts?.shutdown()
