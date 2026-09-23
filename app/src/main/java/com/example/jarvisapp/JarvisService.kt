@@ -1,7 +1,6 @@
 package com.example.jarvisapp
 
 import android.app.*
-import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.PixelFormat
@@ -57,7 +56,7 @@ class JarvisService : Service() {
         configurarEscucha()
         mostrarEsferaInteractiva()
 
-        // Inicializamos el router (no depende del TTS)
+        // Router de IA (no depende del TTS)
         modelRouter = ModelRouter()
 
         // Inicializamos el TTS y, cuando esté listo, creamos el resto
@@ -170,7 +169,7 @@ class JarvisService : Service() {
         try {
             speechRecognizer?.startListening(speechIntent)
         } catch (e: Exception) {
-            // Silenciamos errores de reconocimiento
+            // Silenciamos errores
         }
     }
 
