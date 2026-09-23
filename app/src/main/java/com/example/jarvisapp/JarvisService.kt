@@ -1,6 +1,7 @@
 package com.example.jarvisapp
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.PixelFormat
@@ -17,7 +18,11 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.core.app.NotificationCompat
 import com.example.jarvisapp.ai.ModelRouter
 import com.example.jarvisapp.system.AppController
@@ -42,10 +47,13 @@ class JarvisService : Service() {
     private var speechRecognizer: SpeechRecognizer? = null
     private lateinit var speechIntent: Intent
 
+    // Variables para el long-press
     private var initialX: Int = 0
     private var initialY: Int = 0
     private var initialTouchX: Float = 0f
     private var initialTouchY: Float = 0f
+    private var pressStartTime: Long = 0
+    private var inputOverlay: View? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -56,17 +64,16 @@ class JarvisService : Service() {
         configurarEscucha()
         mostrarEsferaInteractiva()
 
-        // Router de IA (no depende del TTS)
+        // Router de IA
         modelRouter = ModelRouter()
 
-        // Inicializamos el TTS y, cuando esté listo, creamos el resto
+        // TTS + helpers
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("es", "MX")
                 tts?.setPitch(0.85f)
                 tts?.setSpeechRate(1.0f)
 
-                // Ahora sí creamos los helpers que necesitan el TTS
                 appController = AppController(this, tts)
                 searchHelper = SearchHelper(this, tts)
                 batteryMonitor = BatteryMonitor(this, tts)
@@ -84,6 +91,7 @@ class JarvisService : Service() {
 
     private fun mostrarEsferaInteractiva() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
         floatingView = FrameLayout(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -110,26 +118,121 @@ class JarvisService : Service() {
                     initialY = params.y
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
+                    pressStartTime = System.currentTimeMillis()
                     true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
-                    windowManager.updateViewLayout(floatingView, params)
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
                     val diffX = Math.abs(event.rawX - initialTouchX)
                     val diffY = Math.abs(event.rawY - initialTouchY)
-                    if (diffX < 10 && diffY < 10) {
-                        activarMicrofono()
+
+                    // Solo mover si se arrastra más de 15 píxeles
+                    if (diffX > 15 || diffY > 15) {
+                        params.x = initialX + (event.rawX - initialTouchX).toInt()
+                        params.y = initialY + (event.rawY - initialTouchY).toInt()
+                        windowManager.updateViewLayout(floatingView, params)
                     }
                     true
                 }
+
+                MotionEvent.ACTION_UP -> {
+                    val pressDuration = System.currentTimeMillis() - pressStartTime
+                    val diffX = Math.abs(event.rawX - initialTouchX)
+                    val diffY = Math.abs(event.rawY - initialTouchY)
+
+                    // Si no se movió
+                    if (diffX < 15 && diffY < 15) {
+                        if (pressDuration >= 2000) {
+                            // Long press → pantalla de texto
+                            mostrarPantallaDeTexto()
+                        } else {
+                            // Toque corto → micrófono
+                            activarMicrofono()
+                        }
+                    }
+                    true
+                }
+
                 else -> false
             }
         }
+
         windowManager.addView(floatingView, params)
+    }
+
+    private fun mostrarPantallaDeTexto() {
+        if (inputOverlay != null) return
+
+        val editText = EditText(this).apply {
+            hint = "Escribe tu solicitud..."
+            setTextColor(0xFFFFFFFF.toInt())
+            setHintTextColor(0xFFAAAAAA.toInt())
+            setBackgroundColor(0xFF1A1A2E.toInt())
+            setPadding(40, 30, 40, 30)
+            textSize = 16f
+            minWidth = 650
+        }
+
+        val btnEnviar = Button(this).apply {
+            text = "Enviar"
+            setBackgroundColor(0xFF00D4FF.toInt())
+            setTextColor(0xFF000000.toInt())
+            setOnClickListener {
+                val texto = editText.text.toString().trim()
+                if (texto.isNotEmpty()) {
+                    ocultarPantallaDeTexto()
+                    procesarComando("jarvis $texto")
+                }
+            }
+        }
+
+        val btnCerrar = Button(this).apply {
+            text = "✕"
+            setBackgroundColor(0xFFFF4444.toInt())
+            setTextColor(0xFFFFFFFF.toInt())
+            setOnClickListener { ocultarPantallaDeTexto() }
+        }
+
+        val botones = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(btnEnviar)
+            addView(btnCerrar)
+        }
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(0xEE0F0F1A.toInt())
+            setPadding(40, 40, 40, 40)
+            addView(editText)
+            addView(botones)
+        }
+
+        val params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+
+        inputOverlay = layout
+        windowManager.addView(layout, params)
+
+        // Mostrar teclado
+        editText.requestFocus()
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    private fun ocultarPantallaDeTexto() {
+        inputOverlay?.let {
+            try {
+                windowManager.removeView(it)
+            } catch (_: Exception) {}
+            inputOverlay = null
+        }
     }
 
     private fun configurarEscucha() {
@@ -169,7 +272,7 @@ class JarvisService : Service() {
         try {
             speechRecognizer?.startListening(speechIntent)
         } catch (e: Exception) {
-            // Silenciamos errores
+            // Silenciar errores
         }
     }
 
@@ -181,12 +284,8 @@ class JarvisService : Service() {
     private fun procesarComando(command: String) {
         val input = command.lowercase()
 
-        // Filtro de wake word
-        if (!input.contains("jarvis")) {
-            return
-        }
+        if (!input.contains("jarvis")) return
 
-        // Quitamos la palabra "jarvis"
         val clean = input.replace("jarvis", "").trim()
 
         when {
@@ -226,7 +325,6 @@ class JarvisService : Service() {
             }
 
             else -> {
-                // Todo lo demás va al router de IA
                 if (::modelRouter.isInitialized) {
                     scope.launch {
                         val taskType = modelRouter.detectTaskType(clean)
@@ -283,11 +381,15 @@ class JarvisService : Service() {
     }
 
     override fun onDestroy() {
+        ocultarPantallaDeTexto()
+
         if (::batteryMonitor.isInitialized) {
             batteryMonitor.stop()
         }
         if (::floatingView.isInitialized) {
-            windowManager.removeView(floatingView)
+            try {
+                windowManager.removeView(floatingView)
+            } catch (_: Exception) {}
         }
         speechRecognizer?.destroy()
         tts?.shutdown()

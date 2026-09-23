@@ -19,7 +19,7 @@ class AppController(private val context: Context, private val tts: TextToSpeech?
                 if (launch != null) {
                     launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(launch)
-                    tts?.speak("Abriendo ${pm.getApplicationLabel(app)}, Señor.", TextToSpeech.QUEUE_FLUSH, null, null)
+                    tts?.speak("Abriendo ${pm.getApplicationLabel(app)}.", TextToSpeech.QUEUE_FLUSH, null, null)
                     return
                 }
             }
