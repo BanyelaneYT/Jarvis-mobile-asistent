@@ -2,16 +2,6 @@ package com.example.jarvisapp
 
 import android.app.*
 import android.content.Context
-
-import com.example.jarvisapp.ai.ModelRouter
-import com.example.jarvisapp.ai.TaskType
-import com.example.jarvisapp.system.BatteryMonitor
-import com.example.jarvisapp.system.AppController
-import com.example.jarvisapp.system.SearchHelper
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.PixelFormat
@@ -30,6 +20,13 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import androidx.core.app.NotificationCompat
+import com.example.jarvisapp.ai.ModelRouter
+import com.example.jarvisapp.system.AppController
+import com.example.jarvisapp.system.BatteryMonitor
+import com.example.jarvisapp.system.SearchHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.*
 
 class JarvisService : Service() {
@@ -55,23 +52,33 @@ class JarvisService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+
         crearNotificacion()
         configurarEscucha()
         mostrarEsferaInteractiva()
 
+        // Inicializamos el router (no depende del TTS)
         modelRouter = ModelRouter()
-        appController = AppController(this, tts)
-        searchHelper = SearchHelper(this, tts)
 
-        batteryMonitor = BatteryMonitor(this, tts)
-        batteryMonitor.start()
-
+        // Inicializamos el TTS y, cuando esté listo, creamos el resto
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = Locale("es", "MX")
                 tts?.setPitch(0.85f)
                 tts?.setSpeechRate(1.0f)
-                tts?.speak("Sistemas listos, Señor. Reactor Arc iniciado.", TextToSpeech.QUEUE_FLUSH, null, null)
+
+                // Ahora sí creamos los helpers que necesitan el TTS
+                appController = AppController(this, tts)
+                searchHelper = SearchHelper(this, tts)
+                batteryMonitor = BatteryMonitor(this, tts)
+                batteryMonitor.start()
+
+                tts?.speak(
+                    "Sistemas listos, Señor. Reactor Arc iniciado.",
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    null
+                )
             }
         }
     }
@@ -93,14 +100,17 @@ class JarvisService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 100; y = 100
+            x = 100
+            y = 100
         }
 
         floatingView.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    initialX = params.x; initialY = params.y
-                    initialTouchX = event.rawX; initialTouchY = event.rawY
+                    initialX = params.x
+                    initialY = params.y
+                    initialTouchX = event.rawX
+                    initialTouchY = event.rawY
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -112,7 +122,9 @@ class JarvisService : Service() {
                 MotionEvent.ACTION_UP -> {
                     val diffX = Math.abs(event.rawX - initialTouchX)
                     val diffY = Math.abs(event.rawY - initialTouchY)
-                    if (diffX < 10 && diffY < 10) activarMicrofono()
+                    if (diffX < 10 && diffY < 10) {
+                        activarMicrofono()
+                    }
                     true
                 }
                 else -> false
@@ -136,19 +148,30 @@ class JarvisService : Service() {
                 }
                 cambiarColorEsfera(0xFF00D4FF.toInt())
             }
-            override fun onError(error: Int) { cambiarColorEsfera(0xFF00D4FF.toInt()) }
-            override fun onReadyForSpeech(p0: Bundle?) { cambiarColorEsfera(0xFFFF0000.toInt()) }
+
+            override fun onError(error: Int) {
+                cambiarColorEsfera(0xFF00D4FF.toInt())
+            }
+
+            override fun onReadyForSpeech(params: Bundle?) {
+                cambiarColorEsfera(0xFFFF0000.toInt())
+            }
+
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(p0: Float) {}
-            override fun onBufferReceived(p0: ByteArray?) {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onPartialResults(p0: Bundle?) {}
-            override fun onEvent(p0: Int, p1: Bundle?) {}
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
         })
     }
 
     private fun activarMicrofono() {
-        try { speechRecognizer?.startListening(speechIntent) } catch (e: Exception) {}
+        try {
+            speechRecognizer?.startListening(speechIntent)
+        } catch (e: Exception) {
+            // Silenciamos errores de reconocimiento
+        }
     }
 
     private fun cambiarColorEsfera(color: Int) {
@@ -164,42 +187,56 @@ class JarvisService : Service() {
             return
         }
 
-        // Limpiamos la palabra "jarvis" para procesar el resto
+        // Quitamos la palabra "jarvis"
         val clean = input.replace("jarvis", "").trim()
 
         when {
-            clean.contains("nos vemos") || clean.contains("apágate") || clean.contains("apagate") -> {
+            clean.contains("nos vemos") ||
+                    clean.contains("apágate") ||
+                    clean.contains("apagate") -> {
                 apagarSistemas()
             }
 
-            clean.contains("estado") || clean.contains("batería") || clean.contains("bateria") -> {
+            clean.contains("estado") ||
+                    clean.contains("batería") ||
+                    clean.contains("bateria") -> {
                 reportarEstadoBateria()
             }
 
             clean.startsWith("abre ") -> {
                 val app = clean.removePrefix("abre ").trim()
-                appController.openApp(app)
+                if (::appController.isInitialized) {
+                    appController.openApp(app)
+                }
             }
 
             clean.startsWith("busca ") || clean.startsWith("buscar ") -> {
-                val query = clean.substringAfter("busca").substringAfter("buscar").trim()
-                searchHelper.search(query)
+                val query = clean
+                    .substringAfter("busca")
+                    .substringAfter("buscar")
+                    .trim()
+                if (::searchHelper.isInitialized) {
+                    searchHelper.search(query)
+                }
             }
 
             clean.contains("whatsapp") -> {
-                appController.openWhatsApp()
+                if (::appController.isInitialized) {
+                    appController.openWhatsApp()
+                }
             }
 
             else -> {
                 // Todo lo demás va al router de IA
-                scope.launch {
-                    val taskType = modelRouter.detectTaskType(clean)
-                    val respuesta = modelRouter.chat(clean, taskType)
-                    tts?.speak(respuesta, TextToSpeech.QUEUE_FLUSH, null, null)
+                if (::modelRouter.isInitialized) {
+                    scope.launch {
+                        val taskType = modelRouter.detectTaskType(clean)
+                        val respuesta = modelRouter.chat(clean, taskType)
+                        tts?.speak(respuesta, TextToSpeech.QUEUE_FLUSH, null, null)
+                    }
                 }
             }
         }
-      }
     }
 
     private fun apagarSistemas() {
@@ -217,56 +254,44 @@ class JarvisService : Service() {
         val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
         val pct = (level / scale.toFloat() * 100).toInt()
 
-        val respuesta = if (pct <= 20) "El reactor Arc está al $pct por ciento. Energía crítica."
-        else "Reactor Arc al $pct por ciento."
-        tts?.speak(respuesta, TextToSpeech.QUEUE_FLUSH, null, null)
-    }
-
-    private fun gestionarApp(nombre: String, accion: String) {
-        val pm = packageManager
-        val apps = pm.getInstalledApplications(0)
-        for (app in apps) {
-            val label = pm.getApplicationLabel(app).toString().lowercase()
-            if (label.contains(nombre.lowercase())) {
-                val nombreReal = pm.getApplicationLabel(app).toString()
-                if (accion == "ABRIR") {
-                    val intent = pm.getLaunchIntentForPackage(app.packageName)
-                    if (intent != null) {
-                        tts?.speak("Abriendo $nombreReal, Señor.", TextToSpeech.QUEUE_FLUSH, null, null)
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        startActivity(intent)
-                    }
-                } else {
-                    tts?.speak("Cerrando $nombreReal.", TextToSpeech.QUEUE_FLUSH, null, null)
-                    val startMain = Intent(Intent.ACTION_MAIN).apply {
-                        addCategory(Intent.CATEGORY_HOME)
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    startActivity(startMain)
-                }
-                return
-            }
+        val respuesta = if (pct <= 20) {
+            "El reactor Arc está al $pct por ciento. Energía crítica."
+        } else {
+            "Reactor Arc al $pct por ciento."
         }
-        tts?.speak("No localizo la aplicación $nombre.", TextToSpeech.QUEUE_FLUSH, null, null)
+        tts?.speak(respuesta, TextToSpeech.QUEUE_FLUSH, null, null)
     }
 
     private fun crearNotificacion() {
         val channelId = "jarvis_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Jarvis", NotificationManager.IMPORTANCE_LOW)
-            val manager = getSystemService(NotificationManager::class.java) as NotificationManager
+            val channel = NotificationChannel(
+                channelId,
+                "Jarvis",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
-        startForeground(1, NotificationCompat.Builder(this, channelId)
+
+        val notification = NotificationCompat.Builder(this, channelId)
             .setContentTitle("J.A.R.V.I.S.")
             .setContentText("Reactor Arc Activo")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now).build())
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .build()
+
+        startForeground(1, notification)
     }
 
     override fun onDestroy() {
-        batteryMonitor.stop()
-        super.onDestroy()
-        if (::floatingView.isInitialized) windowManager.removeView(floatingView)
+        if (::batteryMonitor.isInitialized) {
+            batteryMonitor.stop()
+        }
+        if (::floatingView.isInitialized) {
+            windowManager.removeView(floatingView)
+        }
         speechRecognizer?.destroy()
         tts?.shutdown()
+        super.onDestroy()
     }
+}

@@ -1,4 +1,4 @@
-package com.example.jarvisapp.config
+package com.example.jarvisapp.system
 
 import android.content.Context
 import android.content.Intent

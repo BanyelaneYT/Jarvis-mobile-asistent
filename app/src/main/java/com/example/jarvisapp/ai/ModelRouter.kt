@@ -1,5 +1,6 @@
 package com.example.jarvisapp.ai
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -13,11 +14,19 @@ import java.util.concurrent.TimeUnit
 class ModelRouter {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
         .build()
 
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
+
+    private val systemPrompt = """
+        Eres J.A.R.V.I.S., el asistente personal de Tony Stark.
+        Responde siempre en español de México, de forma elegante, concisa y útil.
+        Si te piden código, entrega el código limpio y bien formateado.
+        Si no sabes algo, dilo con elegancia.
+    """.trimIndent()
 
     /**
      * Detecta el tipo de tarea a partir del texto del usuario
@@ -29,17 +38,18 @@ class ModelRouter {
             lower.containsAny(
                 "código", "codigo", "programa", "función", "funcion",
                 "clase", "script", "python", "kotlin", "java", "javascript",
-                "bug", "error", "debug", "refactor", "arquitectura"
+                "bug", "error", "debug", "refactor", "arquitectura",
+                "algoritmo", "compilar", "sintaxis"
             ) -> TaskType.CODE
 
             lower.containsAny(
                 "imagen", "genera una imagen", "dibuja", "crea una foto",
-                "ilustración", "ilustracion"
+                "ilustración", "ilustracion", "genera imagen"
             ) -> TaskType.IMAGE
 
             lower.containsAny(
                 "analiza", "explica", "resume", "compara", "qué significa",
-                "que significa", "por qué", "porque", "detalle"
+                "que significa", "por qué", "porque", "detalle", "resumen"
             ) -> TaskType.ANALYSIS
 
             else -> TaskType.GENERAL
@@ -60,16 +70,17 @@ class ModelRouter {
                     TaskType.CODE -> callGroq(userMessage)
                     TaskType.IMAGE -> callGeminiImage(userMessage)
                     TaskType.ANALYSIS, TaskType.GENERAL -> {
-                        // Primero intenta Gemini, si falla usa Groq
                         try {
                             callGemini(userMessage)
                         } catch (e: Exception) {
+                            Log.w("ModelRouter", "Gemini falló, usando Groq: ${e.message}")
                             callGroq(userMessage)
                         }
                     }
                     TaskType.SYSTEM -> "Comando del sistema (no usa IA)"
                 }
             } catch (e: Exception) {
+                Log.e("ModelRouter", "Error general: ${e.message}", e)
                 "Lo siento Señor, tuve un problema al contactar los sistemas: ${e.message}"
             }
         }
@@ -78,11 +89,11 @@ class ModelRouter {
     // ==================== GROQ ====================
     private fun callGroq(prompt: String): String {
         val body = JSONObject().apply {
-            put("model", "llama-3.3-70b-versatile") // o el que prefieras
+            put("model", "llama-3.3-70b-versatile") // Puedes cambiar a llama-3.1-70b-versatile si prefieres
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
-                    put("content", "Eres JARVIS, el asistente de Tony Stark. Responde de forma elegante, concisa y útil en español. Si es código, entrega el código limpio.")
+                    put("content", systemPrompt)
                 })
                 put(JSONObject().apply {
                     put("role", "user")
@@ -90,6 +101,7 @@ class ModelRouter {
                 })
             })
             put("temperature", 0.6)
+            put("max_tokens", 2048)
         }.toString()
 
         val request = Request.Builder()
@@ -100,12 +112,18 @@ class ModelRouter {
             .build()
 
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Groq error: ${response.code}")
-            val json = JSONObject(response.body?.string() ?: "")
+            val responseBody = response.body?.string() ?: throw Exception("Respuesta vacía de Groq")
+
+            if (!response.isSuccessful) {
+                throw Exception("Groq error ${response.code}: $responseBody")
+            }
+
+            val json = JSONObject(responseBody)
             return json.getJSONArray("choices")
                 .getJSONObject(0)
                 .getJSONObject("message")
                 .getString("content")
+                .trim()
         }
     }
 
@@ -116,10 +134,14 @@ class ModelRouter {
                 put(JSONObject().apply {
                     put("parts", JSONArray().apply {
                         put(JSONObject().apply {
-                            put("text", "Eres JARVIS. Responde en español de forma elegante y útil.\n\nUsuario: $prompt")
+                            put("text", "$systemPrompt\n\nUsuario: $prompt")
                         })
                     })
                 })
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.7)
+                put("maxOutputTokens", 2048)
             })
         }.toString()
 
@@ -131,20 +153,26 @@ class ModelRouter {
             .build()
 
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw Exception("Gemini error: ${response.code}")
-            val json = JSONObject(response.body?.string() ?: "")
+            val responseBody = response.body?.string() ?: throw Exception("Respuesta vacía de Gemini")
+
+            if (!response.isSuccessful) {
+                throw Exception("Gemini error ${response.code}: $responseBody")
+            }
+
+            val json = JSONObject(responseBody)
             return json.getJSONArray("candidates")
                 .getJSONObject(0)
                 .getJSONObject("content")
                 .getJSONArray("parts")
                 .getJSONObject(0)
                 .getString("text")
+                .trim()
         }
     }
 
-    // Generación de imágenes con Gemini (simplificado)
+    // ==================== IMÁGENES (placeholder) ====================
     private fun callGeminiImage(prompt: String): String {
-        // Por ahora devolvemos texto. Más adelante se puede integrar Imagen 3 o el endpoint de imágenes.
-        return "Señor, la generación de imágenes aún está en fase de integración. Por ahora puedo describirla o usar Gemini para ideas."
+        // Más adelante se puede integrar el endpoint de Imagen 3 o Gemini multimodal
+        return "Señor, la generación de imágenes aún está en fase de integración. Por ahora puedo ayudarte a describir la imagen o generar ideas."
     }
 }
