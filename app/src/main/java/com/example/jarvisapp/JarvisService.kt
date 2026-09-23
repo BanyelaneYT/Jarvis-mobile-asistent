@@ -2,6 +2,16 @@ package com.example.jarvisapp
 
 import android.app.*
 import android.content.Context
+
+import com.example.jarvisapp.ai.ModelRouter
+import com.example.jarvisapp.ai.TaskType
+import com.example.jarvisapp.system.BatteryMonitor
+import com.example.jarvisapp.system.AppController
+import com.example.jarvisapp.system.SearchHelper
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+
 import android.content.Intent
 import android.content.IntentFilter
 import android.graphics.PixelFormat
@@ -24,6 +34,12 @@ import java.util.*
 
 class JarvisService : Service() {
 
+    private lateinit var modelRouter: ModelRouter
+    private lateinit var batteryMonitor: BatteryMonitor
+    private lateinit var appController: AppController
+    private lateinit var searchHelper: SearchHelper
+    private val scope = CoroutineScope(Dispatchers.Main)
+
     private lateinit var windowManager: WindowManager
     private lateinit var floatingView: View
     private var tts: TextToSpeech? = null
@@ -42,6 +58,13 @@ class JarvisService : Service() {
         crearNotificacion()
         configurarEscucha()
         mostrarEsferaInteractiva()
+
+        modelRouter = ModelRouter()
+        appController = AppController(this, tts)
+        searchHelper = SearchHelper(this, tts)
+
+        batteryMonitor = BatteryMonitor(this, tts)
+        batteryMonitor.start()
 
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -136,28 +159,47 @@ class JarvisService : Service() {
     private fun procesarComando(command: String) {
         val input = command.lowercase()
 
-        // FILTRO CRÍTICO: Si no mencionas "jarvis", no hace nada.
+        // Filtro de wake word
         if (!input.contains("jarvis")) {
-            android.util.Log.d("JARVIS", "Comando ignorado: No se mencionó el nombre clave.")
             return
         }
 
-        // Si llegó aquí, es porque SÍ se dijo "jarvis". Ahora evaluamos la acción:
+        // Limpiamos la palabra "jarvis" para procesar el resto
+        val clean = input.replace("jarvis", "").trim()
+
         when {
-            input.contains("nos vemos") -> apagarSistemas()
-            input.contains("estado") -> reportarEstadoBateria()
-            input.contains("abre") -> {
-                val app = input.substringAfter("abre").trim()
-                gestionarApp(app, "ABRIR")
+            clean.contains("nos vemos") || clean.contains("apágate") || clean.contains("apagate") -> {
+                apagarSistemas()
             }
-            input.contains("cierra") -> {
-                val app = input.substringAfter("cierra").trim()
-                gestionarApp(app, "CERRAR")
+
+            clean.contains("estado") || clean.contains("batería") || clean.contains("bateria") -> {
+                reportarEstadoBateria()
             }
+
+            clean.startsWith("abre ") -> {
+                val app = clean.removePrefix("abre ").trim()
+                appController.openApp(app)
+            }
+
+            clean.startsWith("busca ") || clean.startsWith("buscar ") -> {
+                val query = clean.substringAfter("busca").substringAfter("buscar").trim()
+                searchHelper.search(query)
+            }
+
+            clean.contains("whatsapp") -> {
+                appController.openWhatsApp()
+            }
+
             else -> {
-                tts?.speak("Dígame, Señor.", TextToSpeech.QUEUE_FLUSH, null, null)
+                // Todo lo demás va al router de IA
+                scope.launch {
+                    val taskType = modelRouter.detectTaskType(clean)
+                    val respuesta = modelRouter.chat(clean, taskType)
+                    tts?.speak(respuesta, TextToSpeech.QUEUE_FLUSH, null, null)
+                }
             }
         }
+      }
     }
 
     private fun apagarSistemas() {
@@ -222,9 +264,9 @@ class JarvisService : Service() {
     }
 
     override fun onDestroy() {
+        batteryMonitor.stop()
         super.onDestroy()
         if (::floatingView.isInitialized) windowManager.removeView(floatingView)
         speechRecognizer?.destroy()
         tts?.shutdown()
     }
-}
