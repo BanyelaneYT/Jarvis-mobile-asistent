@@ -1,6 +1,9 @@
 package com.example.jarvisapp
 
 import android.app.*
+import android.graphics.drawable.GradientDrawable
+import android.widget.TextView
+import android.view.Gravity
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -13,7 +16,6 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
-import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -150,20 +152,82 @@ class JarvisService : Service() {
     private fun mostrarPantallaDeTexto() {
         if (inputOverlay != null) return
 
-        val editText = EditText(this).apply {
-            hint = "Escriba su solicitud..."
-            setTextColor(0xFFE0F7FA.toInt())
-            setHintTextColor(0xFF80DEEA.toInt())
-            setBackgroundColor(0xCC0A192F.toInt())
-            setPadding(48, 36, 48, 36)
-            textSize = 16f
-            minWidth = 680
+        // Contenedor principal
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 40, 48, 40)
+
+            // Fondo con bordes redondeados
+            val background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 32f
+                setColor(0xF00B1120.toInt())           // Azul muy oscuro
+                setStroke(2, 0xFF00D4FF.toInt())       // Borde neón cian
+            }
+            this.background = background
+            elevation = 28f
         }
 
-        val btnEnviar = Button(this).apply {
+        // Título
+        val title = TextView(this).apply {
+            text = "J.A.R.V.I.S."
+            setTextColor(0xFF00D4FF.toInt())
+            textSize = 18f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, 20)
+        }
+
+        // Campo de texto
+        val editText = EditText(this).apply {
+            hint = "Escribe tu comando..."
+            setTextColor(0xFFE0F7FA.toInt())
+            setHintTextColor(0xFF4DD0E1.toInt())
+            textSize = 16f
+            setPadding(36, 28, 36, 28)
+            minWidth = 680
+            maxLines = 4
+
+            val editBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 20f
+                setColor(0xFF111827.toInt())
+                setStroke(1, 0xFF00BCD4.toInt())
+            }
+            background = editBg
+        }
+
+        // Contenedor de botones
+        val buttonsLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            setPadding(0, 28, 0, 0)
+        }
+
+        // Botón Cerrar
+        val btnCerrar = TextView(this).apply {
+            text = "Cerrar"
+            setTextColor(0xFFEF5350.toInt())
+            textSize = 15f
+            setPadding(36, 20, 36, 20)
+            setOnClickListener { ocultarPantallaDeTexto() }
+        }
+
+        // Botón Enviar
+        val btnEnviar = TextView(this).apply {
             text = "ENVIAR"
-            setBackgroundColor(0xFF00D4FF.toInt())
             setTextColor(0xFF000000.toInt())
+            textSize = 15f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setPadding(48, 20, 48, 20)
+
+            val sendBg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 16f
+                setColor(0xFF00D4FF.toInt())
+            }
+            background = sendBg
+
             setOnClickListener {
                 val texto = editText.text.toString().trim()
                 if (texto.isNotEmpty()) {
@@ -173,29 +237,16 @@ class JarvisService : Service() {
             }
         }
 
-        val btnCerrar = Button(this).apply {
-            text = "✕"
-            setBackgroundColor(0xFFFF1744.toInt())
-            setTextColor(0xFFFFFFFF.toInt())
-            setOnClickListener { ocultarPantallaDeTexto() }
-        }
+        // Agregar botones
+        buttonsLayout.addView(btnCerrar)
+        buttonsLayout.addView(btnEnviar)
 
-        val botones = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, 24, 0, 0)
-            addView(btnEnviar)
-            addView(btnCerrar)
-        }
+        // Agregar todo al contenedor
+        container.addView(title)
+        container.addView(editText)
+        container.addView(buttonsLayout)
 
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0xEE020617.toInt())
-            setPadding(40, 40, 40, 40)
-            elevation = 24f
-            addView(editText)
-            addView(botones)
-        }
-
+        // Parámetros de la ventana
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -206,9 +257,10 @@ class JarvisService : Service() {
             gravity = Gravity.CENTER
         }
 
-        inputOverlay = layout
-        windowManager.addView(layout, params)
+        inputOverlay = container
+        windowManager.addView(container, params)
 
+        // Mostrar teclado automáticamente
         editText.requestFocus()
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
@@ -287,8 +339,17 @@ class JarvisService : Service() {
                 if (::searchHelper.isInitialized) searchHelper.search(query)
             }
 
-            clean.contains("whatsapp") -> {
-                if (::appController.isInitialized) appController.openWhatsApp()
+            // Dentro de procesarComando, reemplaza el bloque de whatsapp por esto:
+
+            clean.contains("whatsapp") || clean.contains("envía") || clean.contains("envia") ||
+                    clean.contains("manda") || clean.contains("mandar") || clean.contains("mensaje") -> {
+
+                // Intentamos extraer contacto y mensaje
+                val (contact, message) = extractWhatsAppInfo(clean)
+
+                if (::appController.isInitialized) {
+                    appController.sendWhatsApp(contact, message)
+                }
             }
 
             else -> {
@@ -316,6 +377,41 @@ class JarvisService : Service() {
         }
     }
 
+    /**
+     * Extrae el nombre del contacto y el mensaje de frases como:
+     * - "envía a mamá que ya voy"
+     * - "manda mensaje a juan diciendo hola"
+     * - "whatsapp a ana: nos vemos mañana"
+     */
+    private fun extractWhatsAppInfo(text: String): Pair<String?, String?> {
+        val lower = text.lowercase()
+
+        // Patrones comunes
+        val patterns = listOf(
+            Regex("""(?:env[ií]a|manda|mandar|enviar).*?(?:a|al|para)\s+([a-záéíóúñ]+)\s+(?:que|diciendo|dice|:)?\s*(.+)"""),
+            Regex("""(?:whatsapp|mensaje).*?(?:a|al|para)\s+([a-záéíóúñ]+)\s*(?:que|diciendo|dice|:)?\s*(.+)"""),
+            Regex("""(?:env[ií]a|manda).*?whatsapp\s+(?:a\s+)?([a-záéíóúñ]+)\s+(.+)""")
+        )
+
+        for (pattern in patterns) {
+            val match = pattern.find(lower)
+            if (match != null && match.groupValues.size >= 3) {
+                val contact = match.groupValues[1].trim()
+                val message = match.groupValues[2].trim()
+                if (contact.isNotEmpty() && message.isNotEmpty()) {
+                    return Pair(contact, message)
+                }
+            }
+        }
+
+        // Si no detectó contacto, mandamos todo como mensaje
+        val onlyMessage = lower
+            .replace(Regex("""(env[ií]a|manda|mandar|enviar|whatsapp|mensaje|por|a|que|diciendo)"""), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        return Pair(null, onlyMessage.ifEmpty { null })
+    }
     private fun apagarSistemas() {
         tts?.speak("Desconectando sistemas.", TextToSpeech.QUEUE_FLUSH, null, null)
         arcReactor.postDelayed({
